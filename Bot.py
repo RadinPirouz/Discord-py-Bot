@@ -1,160 +1,139 @@
 import discord
-from discord import colour
-from discord import embeds
-from discord.ext import commands
-from discord.ext import tasks
-from asyncio import *
-from discord.ext.commands.errors import DisabledCommand
+from discord.ext import commands, tasks
 import random
 from datetime import datetime
-from urllib import request
+
 prefix = '!'
-TOKEN = "" #Your Token
+TOKEN = ""  # Your Token
 intents = discord.Intents.default()
 intents.members = True
-client = commands.Bot(command_prefix=prefix, intents = intents)
+client = commands.Bot(command_prefix=prefix, intents=intents)
 client.remove_command("help")
-color = [0x0051FF, 0x0042D1, 0xFA73FF, 0x1300D1, 0x00A2D1]
 
+# Predefined Colors for Embeds
+colors = [0x0051FF, 0x0042D1, 0xFA73FF, 0x1300D1, 0x00A2D1]
 
+# Helper function to create embed messages
+def create_embed(description, color=None):
+    return discord.Embed(colour=color or random.choice(colors), description=description)
+
+# Helper function to clear a specified number of messages
+async def clear_messages(ctx, amount):
+    await ctx.channel.purge(limit=amount + 1)
+    await ctx.send(embed=create_embed(f'{amount} messages cleared'))
+    await ctx.channel.purge(limit=1)
+
+# ----- Background Task ----- #
 @tasks.loop(seconds=10.0)
-async def my_background_task():
-    members = 0
-    for guild in client.guilds:
-        members += guild.member_count - 1
-        await client.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=f"{members} Members"),status=discord.Status.dnd)
+async def update_member_count():
+    total_members = sum(guild.member_count for guild in client.guilds)
+    await client.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=f"{total_members} Members"), status=discord.Status.dnd)
 
-    
+# ----- Bot Events ----- #
 @client.event
 async def on_ready():
-    print('Logged in as: {}'.format(client.user.name))
-    print('Bot user: {}'.format(client.user))
+    print(f'Logged in as: {client.user.name}')
+    print(f'Bot user: {client.user}')
     print('----------------------------')
     print('| created : 17/05/2020     |')
-    print('| last updated: 1/1/2022 |')
-    print('| Developer: RadinPirouz   |')
+    print('| last updated: 1/1/2022   |')
+    print('| Developer: RadinPirouz    |')
     print('----------------------------')
+    update_member_count.start()
 
-    my_background_task.start()
-# ----- Admin Command ----- #
-@client.command(description = "Clear")
+# ----- Admin Commands ----- #
+@client.command(description="Clear messages")
 @commands.has_permissions(manage_messages=True)
-async def clear(ctx, amount = 2):
-    await ctx.channel.purge(limit=amount+1)
-    embed = discord.Embed(colour=random.choice(color),description=f'{amount} Pyam Pak Shode')
-    await ctx.send(embed=embed)
-    amount = 1
-    await ctx.channel.purge(limit=amount)
-    amount = 5  
-    
-@client.command(description = "Kick Member")
+async def clear(ctx, amount: int = 2):
+    await clear_messages(ctx, amount)
+
+@client.command(description="Kick Member")
 @commands.has_permissions(kick_members=True)
 async def kick(ctx, member: discord.Member, *, reason=None):
     await member.kick(reason=reason)
-    amount = 1
-    await ctx.channel.purge(limit=amount)
-    embed = discord.Embed(colour=random.choice(color),description=f'{member} Kick Shod')
-    await ctx.send(embed=embed)
-    
-@client.command()
+    await ctx.send(embed=create_embed(f'{member} has been kicked'))
+    await clear_messages(ctx, 1)
+
+@client.command(description="Ban Member")
 @commands.has_permissions(ban_members=True)
 async def ban(ctx, member: discord.Member, *, reason=None):
     await member.ban(reason=reason)
-    amount = 1
-    await ctx.channel.purge(limit=amount)
-    embed = discord.Embed(colour=random.choice(color),description=f'{member} Ban Shod')
-    await ctx.send(embed=embed)
-    
-@client.command()
+    await ctx.send(embed=create_embed(f'{member} has been banned'))
+    await clear_messages(ctx, 1)
+
+@client.command(description="Announce a message")
 @commands.has_permissions(manage_messages=True)
-async def announce(ctx, *, input2):
-    amount = 1
-    await ctx.channel.purge(limit=amount)
-    embed = discord.Embed(colour=random.choice(color),description=input2)
-    await ctx.send(embed=embed)
-    
-@client.command(description="Mutes the specified user.")
+async def announce(ctx, *, message):
+    await ctx.send(embed=create_embed(message))
+    await clear_messages(ctx, 1)
+
+# Mute and Unmute Command
+@client.command(description="Mute a user")
 @commands.has_permissions(administrator=True)
-async def mute(cdv, member: discord.Member, *, reason=None):
-    guild = cdv.guild
-    mutedRole = discord.utils.get(guild.roles, name="Muted")
-    if not mutedRole:
-        mutedRole = await guild.create_role(name="Muted")
+async def mute(ctx, member: discord.Member, *, reason=None):
+    guild = ctx.guild
+    muted_role = discord.utils.get(guild.roles, name="Muted")
+    if not muted_role:
+        muted_role = await guild.create_role(name="Muted")
         for channel in guild.channels:
-            await channel.set_permissions(mutedRole, speak=False, send_messages=False, read_message_history=True, read_messages=False, connect=False)
-    await member.add_roles(mutedRole, reason=reason)
-    await cdv.send(f"Muted {member.mention} for reason {reason}")
-    await member.send(f"Sho{guild.name} for {reason}")
-    
-@client.command(description="Unmutes a specified user.")
+            await channel.set_permissions(muted_role, speak=False, send_messages=False, read_message_history=True, read_messages=False)
+    await member.add_roles(muted_role, reason=reason)
+    await ctx.send(f"{member.mention} has been muted for {reason}")
+    await member.send(f"You were muted in {guild.name} for {reason}")
+
+@client.command(description="Unmute a user")
 @commands.has_permissions(administrator=True)
-async def unmute(cdv, member: discord.Member):
-    mutedRole = discord.utils.get(cdv.guild.roles, name="Muted")
+async def unmute(ctx, member: discord.Member):
+    muted_role = discord.utils.get(ctx.guild.roles, name="Muted")
+    await member.remove_roles(muted_role)
+    await ctx.send(f"{member.mention} has been unmuted")
+    await member.send(f"You were unmuted in {ctx.guild.name}")
 
-    await member.remove_roles(mutedRole)
-    await cdv.send(f"Unmuted {member.mention}")
-    await member.send(f"You were unmuted in the server {cdv.guild.name}")
-
-@client.command()
+# ----- Developer Commands ----- #
+@client.command(description="Send DM to a user")
 @commands.has_permissions(administrator=True)
-async def warn(ctx,member: discord.Member,*,result):
-    authorm = ctx.message.author
-    embed = discord.Embed(title = "New Warn",colour=random.choice(color),description=f"Warn Be **{member}** Be Dalil **{result}** Dadeshod")
-    await ctx.send(embed=embed)
-    embed = discord.Embed(title = "New Warn",colour=random.choice(color),description=f"Shoma Tavasot **{authorm}** Be Dalil **{result}** Warn Gereftid")
-    await member.send(embed=embed)
-    
-    
+async def dmsend(ctx, member: discord.Member, *, message):
+    await member.send(message)
+    await ctx.send(embed=create_embed(f'Message sent to {member.mention}'))
 
-# ----- Developer Command ----- #
-
-@client.command()
-@commands.has_permissions(administrator=True)
-async def dmsend(cdv, member: discord.Member,*, res):
-    embed = discord.Embed(colour=random.choice(color),description=f"Payam Baraye  {member.mention} Ferstade Shod ")
-    await cdv.send(embed=embed)
-    await member.send(res)
-    
-@client.command()
+@client.command(description="Set bot status to updating")
 @commands.has_permissions(administrator=True)
 async def updating(ctx):
     await client.change_presence(status=discord.Status.dnd, activity=discord.Activity(type=discord.ActivityType.watching, name="Updating Bot"))
-    embed = discord.Embed(colour=random.choice(color),description=f"Bot be Halat Updating Raft")
-    await ctx.send(embed=embed)
-@client.command()
+    await ctx.send(embed=create_embed(f"Bot is in updating mode"))
+
+@client.command(description="Reset bot status")
 @commands.has_permissions(administrator=True)
 async def resetstatus(ctx):
     await client.change_presence(status=discord.Status.online, activity=discord.Activity(type=discord.ActivityType.watching, name="RadinPirouz"))
-    embed = discord.Embed(colour=random.choice(color),description=f"Bot Az Halat Updating Dar Amad")
-    await ctx.send(embed=embed)
+    await ctx.send(embed=create_embed(f"Bot status reset"))
 
-@client.command()
-@commands.has_permissions(administrator=True)
+@client.command(description="Fetch user creation date")
 async def datauser(ctx, member: discord.Member):
     created_at = member.created_at.strftime("%b %d, %Y")
-    embed = discord.Embed(colour=random.choice(color),description=f"In Account Dar Tarikh {created_at} Sakhte Shode Ast")
-    await ctx.send(embed=embed)
+    await ctx.send(embed=create_embed(f"This account was created on {created_at}"))
 
-
-@client.command()
+# ----- General Commands ----- #
+@client.command(description="Check bot's latency")
 async def ping(ctx):
-    embed = discord.Embed(colour=random.choice(color),description=f' Ping Bot Is :{round(client.latency * 1000)}MS')
-    await ctx.send(embed=embed)
+    latency = round(client.latency * 1000)
+    await ctx.send(embed=create_embed(f'Ping: {latency}ms'))
 
-@client.command()
+# ----- Help Command ----- #
+@client.command(description="Display available commands")
 async def help(ctx):
-    embed = discord.Embed(title="Help <a:watermelon:902934535040274452>", colour=random.choice(color))
-    embed.add_field(name="!ban", value="```❌بن کردن پلیر مورد نظر❌```", inline=True)
-    embed.add_field(name="!kick", value="```❌کیک کردن پلیر مورد نظر❌```", inline=True)
-    embed.add_field(name="!mute", value="```❗گرفتن درسترسی پلیر به چنل ها❗```", inline=True)
-    embed.add_field(name="!unmute",value="```🟩آزاد کردن دسترسی های پلیر🟩```", inline=True)
-    embed.add_field(name="!announce",value="```📢انانس زدن در چنل📢```", inline=True)
-    embed.add_field(name="!warn",value="```❌وارن دادن به ممبر مورد نظر❌```", inline=True)
-    embed.add_field(name="!dmsend", value="```💣فرستادن پیام از طریق بات برای فرد مورد نظر💣```", inline=True)
-    embed.add_field(name="!datauser",value="```📅گرفتن تاریخ ساخته شدن اکانت مورد نظر📅```", inline=True)
-    embed.add_field(name="!clear",value="```🧧پاک کردن پیام ها در یک چنل🧧```", inline=True)
-    embed.add_field(name="!ping", value="```🔓گرفتن پینگ بات🔓```", inline=True)
+    embed = discord.Embed(title="Help Menu", colour=random.choice(colors))
+    embed.add_field(name="!ban", value="Ban a user", inline=True)
+    embed.add_field(name="!kick", value="Kick a user", inline=True)
+    embed.add_field(name="!mute", value="Mute a user", inline=True)
+    embed.add_field(name="!unmute", value="Unmute a user", inline=True)
+    embed.add_field(name="!announce", value="Make an announcement", inline=True)
+    embed.add_field(name="!warn", value="Warn a user", inline=True)
+    embed.add_field(name="!dmsend", value="Send a DM to a user", inline=True)
+    embed.add_field(name="!datauser", value="Fetch account creation date", inline=True)
+    embed.add_field(name="!clear", value="Clear messages", inline=True)
+    embed.add_field(name="!ping", value="Check bot latency", inline=True)
     await ctx.send(embed=embed)
 
-
+# Start the bot
 client.run(TOKEN)
